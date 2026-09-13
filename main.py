@@ -26,48 +26,51 @@ def fetch_company_tickers_exchange() -> dict:
     ).json()
 
 
-def get_most_recent_10_k(cik: int) -> tuple[str, str]:
+def save_file_to_pdf(url: str, output_file_name: str) -> None:
+    file = sec_request(url)
+    print(f"Downloaded: {len(file.content)} bytes")
+    HTML(string=file.text, base_url=url).write_pdf(output_file_name)
+    print(f"PDF generated: {output_file_name}")
+
+
+def get_file_url(cik: int, accession_number: str) -> str:
+    file = sec_request(
+        f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}.txt"
+    ).text.split("\n")
+    file_name = None
+
+    # This seems like a hack, but couldnt find a more appropriate endpoint
+    for line in file:
+        if "<FILENAME>" in line:
+            file_name = line.split("<FILENAME>")[1]
+            break
+    else:
+        raise Exception("No file name found in accession file")
+
+    print(f"File name: {file_name}")
+
+    return f"https://www.sec.gov/Archives/edgar/data/{cik}/{format_accession_number(accession_number)}/{file_name}"
+
+
+def get_most_recent_filing(cik: int, form: str) -> tuple[str, str]:
     submissions = sec_request(
         f"https://data.sec.gov/submissions/{format_cik(cik)}.json"
     ).json()
 
     filings = submissions["filings"]["recent"]
 
-    ten_k_indices = [i for i, form in enumerate(filings["form"]) if form == "10-K"]
+    indices = [i for i, form_id in enumerate(filings["form"]) if form_id == form]
 
-    if not ten_k_indices:
-        raise ValueError("Did not find 10-K")
+    if not indices:
+        raise ValueError("Did not find form")
 
-    most_recent_index = max(ten_k_indices, key=lambda i: filings["filingDate"][i])
+    # Fairly certain these are always in order, but incase they aren't we sort them
+    most_recent_index = max(indices, key=lambda i: filings["filingDate"][i])
 
     return (
         filings["accessionNumber"][most_recent_index],
         filings["filingDate"][most_recent_index],
     )
-
-
-def get_10_k_file_url(cik: int, accession_number: str) -> str:
-    file = sec_request(
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}.txt"
-    ).text.split("\n")
-    file_name = None
-    for line in file:
-        if "<FILENAME>" in line:
-            file_name = line.split("<FILENAME>")[1]
-            break
-    else:
-        raise Exception("No file name found in 10-K accession file")
-
-    print(f"10-K file name: {file_name}")
-
-    return f"https://www.sec.gov/Archives/edgar/data/{cik}/{format_accession_number(accession_number)}/{file_name}"
-
-
-def save_file_to_pdf(url: str, output_file_name: str) -> None:
-    file = sec_request(url)
-    print(f"Downloaded 10-K: {len(file.content)} bytes")
-    HTML(string=file.text, base_url=url).write_pdf(output_file_name)
-    print(f"PDF generated: {output_file_name}")
 
 
 def get_cik_for_company(identifier: str):
@@ -85,16 +88,16 @@ def get_cik_for_company(identifier: str):
         if identifier == name or identifier == ticker:
             cik = item[cik_index]
             print(f"CIK found for {item[name_index]}: {cik}")
-            return cik, item[name_index]
+            return cik, item[name_index], item[ticker_index]
 
     raise Exception(f"No CIK found for {identifier}")
 
 
-def create_most_recent_10_k_for_company(identifier: str, output_file_name: str = None):
-    cik, company_name = get_cik_for_company(identifier)
-    accession_number, filing_date = get_most_recent_10_k(cik)
-    file_url = get_10_k_file_url(cik, accession_number)
-    file_name = output_file_name or f"{format_cik(cik)}.pdf"
+def download_most_recent_filing_for_company(identifier: str, form: str, output_file_name: str = None):
+    cik, company_name, company_ticker = get_cik_for_company(identifier)
+    accession_number, filing_date = get_most_recent_filing(cik, form)
+    file_url = get_file_url(cik, accession_number)
+    file_name = output_file_name or f"{company_ticker}-{form}-{filing_date}.pdf"
     os.makedirs("output", exist_ok=True)
     output_path = os.path.join("output", file_name)
     save_file_to_pdf(file_url, output_path)
@@ -105,7 +108,7 @@ def create_most_recent_10_k_for_company(identifier: str, output_file_name: str =
         "PDF File Name": output_path,
         "Accession Number": accession_number,
         "Filing Date": filing_date,
-        "10-K URL": file_url,
+        "URL": file_url,
     }
 
 
@@ -118,7 +121,7 @@ if __name__ == "__main__":
         )
 
     try:
-        output = create_most_recent_10_k_for_company(identifier)
+        output = download_most_recent_filing_for_company(identifier, '8-K')
         print("Finished generating 10-K pdf:")
         for key, val in output.items():
             print(f"    {key}: {val}")
