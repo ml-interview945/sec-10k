@@ -121,7 +121,7 @@ if __name__ == "__main__":
         )
 
     try:
-        output = download_most_recent_filing_for_company(identifier, '8-K')
+        output = download_most_recent_filing_for_company(identifier, '10-K')
         print("Finished generating 10-K pdf:")
         for key, val in output.items():
             print(f"    {key}: {val}")
